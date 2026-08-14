@@ -1,0 +1,8 @@
+{
+  "name": "SetFilmizle",
+  "description": "SetFilmizle CloudStream Plugin",
+  "manifestVersion": 1,
+  "pluginLists": [
+    "https://raw.githubusercontent.com/Yolcu35/Deneme-2/builds/plugins.json"
+  ]
+}
