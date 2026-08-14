@@ -2,8 +2,12 @@ name: Build CloudStream Plugin
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -26,3 +30,37 @@ jobs:
 
       - name: Build plugin
         run: gradle SetFilmizle:make
+
+      - name: Generate plugins.json
+        run: gradle makePluginsJson
+
+      - name: Prepare builds branch
+        run: |
+          mkdir -p /tmp/builds
+          cp -r . /tmp/builds/source
+
+      - name: Publish build
+        run: |
+          mkdir -p /tmp/publish
+
+          find . -type f \( -name "*.cs3" -o -name "plugins.json" \) -exec cp {} /tmp/publish/ \;
+
+          git fetch origin builds || true
+
+          if git show-ref --verify --quiet refs/remotes/origin/builds; then
+            git checkout -B builds origin/builds
+          else
+            git checkout --orphan builds
+            git rm -rf . || true
+          fi
+
+          cp /tmp/publish/* . 2>/dev/null || true
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add .
+
+          git diff --cached --quiet || git commit -m "Build SetFilmizle plugin"
+
+          git push origin builds
