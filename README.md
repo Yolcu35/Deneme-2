@@ -1,29 +1,10 @@
-# SetFilmizle CloudStream Provider
+# SetFilmizle Cloudstream Provider
 
-CloudStream 3 için SetFilmizle provider projesi.
+[Cloudstream 3](https://github.com/recloudstream/cloudstream) uygulaması için geliştirilmiş **SetFilmizle** eklentisidir.
 
-## Geliştirme durumu
-
-Bu sürüm gerçek CloudStream plugin yapısını kullanır ve provider'ın derlenebilir
-temelini oluşturur.
-
-- Provider/plugin sınıfları: hazır
-- Türkçe dil: hazır
-- Film/dizi türleri: hazır
-- Arama parser'ı: sonraki aşama
-- Film/dizi detay parser'ı: sonraki aşama
-- Bölüm/sezon parser'ı: sonraki aşama
-- Stream yükleme: yalnızca izinli/açık video kaynakları için
-
-## Derleme
-
-```bash
-gradle SetFilmizle:make
-```
-
-CloudStream'in resmi TestPlugins şablonu bu repository yapısının temel alınacağı
-örnektir.
-
-## Kaynak
-
-Site: https://www.setfilmizle.ltd/
+## Özellikler
+* 🏠 Ana sayfa keşfet desteği (`getMainPage`)
+* 🔍 Ajax tabanlı hızlı arama sistemi (`search`)
+* 🎬 Film ve Dizi (Sezon/Bölüm) desteği (`load`)
+* 🎥 Otomatik video oynatıcı entegrasyonu (`loadLinks`)
+* 
