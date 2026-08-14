@@ -65,7 +65,7 @@ class SetFilmizleProvider : MainAPI() {
 
             if (title.isBlank()) continue
 
-            val poster = getImageUrl(article)
+            val poster: String? = getImageUrl(article)
 
             if (isSeriesUrl(url)) {
                 results.add(
@@ -126,20 +126,29 @@ class SetFilmizleProvider : MainAPI() {
 
         val document = response.document
 
-        val title = document.selectFirst("h1.entry-title, h1.post-title, h1")
+        val title: String = document.selectFirst("h1.entry-title, h1.post-title, h1")
             ?.text()?.trim()?.removeSuffix(" izle")?.trim() ?: return null
 
-        val poster = document.selectFirst("div.poster img, .foto img")?.let { img ->
-            img.attr("src").takeIf { it.isNotBlank() }
-                ?: img.attr("data-src").takeIf { it.isNotBlank() }
-        }?.let { absoluteUrl(it) } ?: document.selectFirst("meta[property='og:image']")?.attr("content")?.let { absoluteUrl(it) }
+        val posterElement = document.selectFirst("div.poster img, .foto img")
+        val poster: String? = if (posterElement != null) {
+            val src = posterElement.attr("src").trim()
+            val dataSrc = posterElement.attr("data-src").trim()
+            when {
+                src.isNotBlank() -> absoluteUrl(src)
+                dataSrc.isNotBlank() -> absoluteUrl(dataSrc)
+                else -> null
+            }
+        } else {
+            document.selectFirst("meta[property='og:image']")?.attr("content")?.trim()
+                ?.takeIf { it.isNotBlank() }?.let { absoluteUrl(it) }
+        }
 
-        val description = document.selectFirst("div.wp-content p, .description, .plot")?.text()?.trim()
+        val description: String? = document.selectFirst("div.wp-content p, .description, .plot")?.text()?.trim()
 
-        val year = document.selectFirst("div.extra span.C a, a[href*='/yil/']")
+        val year: Int? = document.selectFirst("div.extra span.C a, a[href*='/yil/']")
             ?.text()?.trim()?.toIntOrNull()
 
-        val tags = document.select("div.sgeneros a, .genres a, .genre a")
+        val tags: List<String> = document.select("div.sgeneros a, .genres a, .genre a")
             .map { it.text().trim() }
             .filter { it.isNotBlank() }
             .distinct()
@@ -154,8 +163,8 @@ class SetFilmizleProvider : MainAPI() {
                 val episodeUrl = absoluteUrl(rawEpisodeUrl)
                 val episodeText = link.text().trim()
 
-                val season = Regex("""(?i)(\d+)\.\s*Sezon""").find(episodeText)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 1
-                val episode = Regex("""(?i)Bölüm\s*(\d+)""").find(episodeText)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 1
+                val season: Int = Regex("""(?i)(\d+)\.\s*Sezon""").find(episodeText)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 1
+                val episode: Int = Regex("""(?i)Bölüm\s*(\d+)""").find(episodeText)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 1
 
                 episodes.add(
                     newEpisode(episodeUrl) {
@@ -190,7 +199,6 @@ class SetFilmizleProvider : MainAPI() {
     ): Boolean {
         val document = app.get(data).document
 
-        // Sayfa içerisindeki iframe veya video kaynaklarını bulma
         for (element in document.select("iframe, .player-container iframe, .video-content iframe")) {
             val src = element.attr("src").ifBlank { element.attr("data-src") }
             if (src.isBlank()) continue
