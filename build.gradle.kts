@@ -19,6 +19,14 @@ allprojects {
     }
 }
 
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven("https://jitpack.io")
+    }
+}
+
 subprojects {
     apply(plugin = "com.android.library")
     apply(plugin = "kotlin-android")
