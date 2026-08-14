@@ -1,7 +1,6 @@
 package com.aykut.setfilmizle
 
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.loadExtractor
 import org.json.JSONObject
@@ -20,6 +19,48 @@ class SetFilmizleProvider : MainAPI() {
         TvType.Movie,
         TvType.TvSeries
     )
+
+    override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val document = app.get("$mainUrl/page/$page/").document
+        val items = ArrayList<HomePageList>()
+
+        val elements = document.select("div.items article, .item, div.post")
+        val homeList = ArrayList<SearchResponse>()
+
+        for (element in elements) {
+            val link = element.selectFirst("a[href]") ?: continue
+            val rawUrl = link.attr("href").trim()
+            if (rawUrl.isBlank()) continue
+
+            val url = absoluteUrl(rawUrl)
+            val title = element.selectFirst("h2, .title")?.text()?.trim()
+                ?.takeIf { it.isNotBlank() } ?: link.text().trim()
+
+            if (title.isBlank()) continue
+
+            val poster: String? = getImageUrl(element)
+
+            if (isSeriesUrl(url)) {
+                homeList.add(
+                    newTvSeriesSearchResponse(title, url, TvType.TvSeries) {
+                        posterUrl = poster
+                    }
+                )
+            } else {
+                homeList.add(
+                    newMovieSearchResponse(title, url, TvType.Movie) {
+                        posterUrl = poster
+                    }
+                )
+            }
+        }
+
+        if (homeList.isNotEmpty()) {
+            items.add(HomePageList("Ana Sayfa", homeList))
+        }
+
+        return HomePageResponse(items)
+    }
 
     override suspend fun search(query: String): List<SearchResponse> {
         val home = app.get(mainUrl)
