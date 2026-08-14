@@ -1,84 +1,101 @@
 package com.aykut.setfilmizle
 
+import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.TvType
-import com.lagradost.cloudstream3.LoadResponse
-import com.lagradost.cloudstream3.newMovieSearchResponse
-import com.lagradost.cloudstream3.newTvSeriesSearchResponse
-import com.lagradost.cloudstream3.newMovieLoadResponse
-import com.lagradost.cloudstream3.newTvSeriesLoadResponse
 import com.lagradost.cloudstream3.app
+import com.lagradost.cloudstream3.newMovieLoadResponse
+import com.lagradost.cloudstream3.newMovieSearchResponse
+import com.lagradost.cloudstream3.newTvSeriesLoadResponse
+import com.lagradost.cloudstream3.newTvSeriesSearchResponse
 import java.net.URLEncoder
 
 class SetFilmizleProvider : MainAPI() {
 
-    override var name = "SetFilmizle"
+    override var name: String = "SetFilmizle"
 
-    override var mainUrl = "https://www.setfilmizle.ltd"
+    override var mainUrl: String = "https://www.setfilmizle.ltd"
 
-    override var lang = "tr"
+    override var lang: String = "tr"
 
     override val supportedTypes = setOf(
         TvType.Movie,
         TvType.TvSeries
     )
 
-    override val hasMainPage = false
+    override val hasMainPage: Boolean = false
 
     override suspend fun search(
         query: String
     ): List<SearchResponse> {
 
-        val encodedQuery = URLEncoder.encode(
-            query,
-            "UTF-8"
-        )
+        val encodedQuery: String =
+            URLEncoder.encode(query, "UTF-8")
 
-        val searchUrl = "$mainUrl/?s=$encodedQuery"
+        val searchUrl: String =
+            "$mainUrl/?s=$encodedQuery"
 
-        val response = app.get(searchUrl)
+        val document =
+            app.get(searchUrl).document
 
-        val document = response.document
+        val results =
+            ArrayList<SearchResponse>()
 
-        return document
+        document
             .select("article, .post, .film, .movie, .item")
-            .mapNotNull { element ->
+            .forEach { element ->
 
-                val link = element
-                    .selectFirst("a[href]")
-                    ?.attr("href")
-                    ?: return@mapNotNull null
+                val linkElement =
+                    element.selectFirst("a[href]")
 
-                val title = element
-                    .selectFirst(
-                        "h1, h2, h3, h4, .title, .entry-title"
-                    )
-                    ?.text()
-                    ?.trim()
-                    ?: element
-                        .selectFirst("a[href]")
-                        ?.text()
-                        ?.trim()
-                    ?: return@mapNotNull null
-
-                if (title.isBlank()) {
-                    return@mapNotNull null
+                if (linkElement == null) {
+                    return@forEach
                 }
 
-                val poster = element
-                    .selectFirst("img")
-                    ?.let { img ->
-                        img.attr("data-src")
-                            .ifBlank {
-                                img.attr("src")
+                val link: String =
+                    linkElement.attr("href")
+
+                if (link.isBlank()) {
+                    return@forEach
+                }
+
+                val titleElement =
+                    element.selectFirst(
+                        "h1, h2, h3, h4, .title, .entry-title"
+                    )
+
+                val title: String =
+                    titleElement?.text()?.trim()
+                        ?: linkElement.text().trim()
+
+                if (title.isBlank()) {
+                    return@forEach
+                }
+
+                val imageElement =
+                    element.selectFirst("img")
+
+                val poster: String? =
+                    if (imageElement != null) {
+                        val dataSrc =
+                            imageElement.attr("data-src")
+
+                        if (dataSrc.isNotBlank()) {
+                            dataSrc
+                        } else {
+                            val src =
+                                imageElement.attr("src")
+
+                            src.ifBlank {
+                                null
                             }
-                    }
-                    ?.takeIf {
-                        it.isNotBlank()
+                        }
+                    } else {
+                        null
                     }
 
-                val isSeries =
+                val isSeries: Boolean =
                     link.contains(
                         "/dizi/",
                         ignoreCase = true
@@ -90,61 +107,75 @@ class SetFilmizleProvider : MainAPI() {
 
                 if (isSeries) {
 
-                    newTvSeriesSearchResponse(
-                        name = title,
-                        url = link
-                    ) {
-                        posterUrl = poster
-                    }
+                    results.add(
+                        newTvSeriesSearchResponse(
+                            name = title,
+                            url = link
+                        ) {
+                            posterUrl = poster
+                        }
+                    )
 
                 } else {
 
-                    newMovieSearchResponse(
-                        name = title,
-                        url = link
-                    ) {
-                        posterUrl = poster
-                    }
+                    results.add(
+                        newMovieSearchResponse(
+                            name = title,
+                            url = link
+                        ) {
+                            posterUrl = poster
+                        }
+                    )
                 }
             }
-            .distinctBy {
-                it.url
-            }
+
+        return results.distinctBy {
+            it.url
+        }
     }
 
     override suspend fun load(
         url: String
     ): LoadResponse? {
 
-        val document = app
-            .get(url)
-            .document
+        val document =
+            app.get(url).document
 
-        val title = document
-            .selectFirst(
+        val titleElement =
+            document.selectFirst(
                 "h1.entry-title, h1.title, h1"
             )
-            ?.text()
-            ?.trim()
-            ?: return null
 
-        val poster = document
-            .selectFirst(
+        val title: String =
+            titleElement?.text()?.trim()
+                ?: return null
+
+        val imageElement =
+            document.selectFirst(
                 "meta[property=og:image]"
             )
-            ?.attr("content")
-            ?.takeIf {
-                it.isNotBlank()
-            }
 
-        val description = document
-            .selectFirst(
+        val poster: String? =
+            imageElement
+                ?.attr("content")
+                ?.takeIf {
+                    it.isNotBlank()
+                }
+
+        val descriptionElement =
+            document.selectFirst(
                 "meta[property=og:description]"
             )
-            ?.attr("content")
-            ?.trim()
 
-        val isSeries =
+        val description: String? =
+            descriptionElement
+                ?.attr("content")
+                ?.trim()
+                ?.takeIf {
+                    it.isNotBlank()
+                }
+
+        val isSeries: Boolean =
             url.contains(
                 "/dizi/",
                 ignoreCase = true
@@ -154,9 +185,9 @@ class SetFilmizleProvider : MainAPI() {
                 ignoreCase = true
             )
 
-        if (isSeries) {
+        return if (isSeries) {
 
-            return newTvSeriesLoadResponse(
+            newTvSeriesLoadResponse(
                 name = title,
                 url = url,
                 type = TvType.TvSeries,
@@ -168,7 +199,7 @@ class SetFilmizleProvider : MainAPI() {
 
         } else {
 
-            return newMovieLoadResponse(
+            newMovieLoadResponse(
                 name = title,
                 url = url,
                 type = TvType.Movie,
