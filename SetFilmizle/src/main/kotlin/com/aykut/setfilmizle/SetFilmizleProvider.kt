@@ -1,12 +1,10 @@
 package com.aykut.setfilmizle
 
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
-import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
-import com.lagradost.cloudstream3.utils.toRatingInt
 import org.json.JSONObject
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
+import java.net.URLEncoder
 
 class SetFilmizleProvider : MainAPI() {
 
@@ -32,9 +30,14 @@ class SetFilmizleProvider : MainAPI() {
         val mainPage =
             app.get(mainUrl).document
 
+        val html =
+            mainPage.html()
+
         val nonce =
-            Regex("""nonce:\s*['"]([^'"]+)['"]""")
-                .find(mainPage.html())
+            Regex(
+                """nonce\s*:\s*['"]([^'"]+)['"]"""
+            )
+                .find(html)
                 ?.groupValues
                 ?.get(1)
                 ?: return emptyList()
@@ -57,39 +60,56 @@ class SetFilmizleProvider : MainAPI() {
         }
 
         val json =
-            JSONObject(response.text)
+            try {
+                JSONObject(response.text)
+            } catch (e: Exception) {
+                return emptyList()
+            }
 
-        val html =
+        val resultHtml =
             json.optString("html")
 
-        if (html.isBlank()) {
+        if (resultHtml.isBlank()) {
             return emptyList()
         }
 
         val document =
-            Jsoup.parse(html)
+            Jsoup.parse(resultHtml)
 
         return document
             .select("div.items article")
             .mapNotNull {
                 it.toSearchResult()
             }
+            .distinctBy {
+                it.url
+            }
     }
 
-    private fun Element.toSearchResult(): SearchResponse? {
+    private fun Element.toSearchResult():
+        SearchResponse? {
+
+        val linkElement =
+            selectFirst("a")
+                ?: return null
+
+        val href =
+            fixUrlNull(
+                linkElement.attr("href")
+            )
+                ?: return null
 
         val title =
             selectFirst("h2")
                 ?.text()
                 ?.trim()
-                ?: return null
+                ?: linkElement
+                    .text()
+                    .trim()
 
-        val href =
-            fixUrlNull(
-                selectFirst("a")
-                    ?.attr("href")
-            )
-                ?: return null
+        if (title.isBlank()) {
+            return null
+        }
 
         val poster =
             fixUrlNull(
@@ -97,12 +117,13 @@ class SetFilmizleProvider : MainAPI() {
                     ?.attr("data-src")
             )
 
-        return if (
+        val isSeries =
             href.contains(
                 "/dizi/",
                 ignoreCase = true
             )
-        ) {
+
+        return if (isSeries) {
 
             newTvSeriesSearchResponse(
                 name = title,
@@ -156,7 +177,7 @@ class SetFilmizleProvider : MainAPI() {
                 ?.text()
                 ?.trim()
 
-        var year =
+        val year =
             document
                 .selectFirst(
                     "div.extra span.C a"
@@ -171,26 +192,10 @@ class SetFilmizleProvider : MainAPI() {
                 .map {
                     it.text().trim()
                 }
-
-        val rating =
-            document
-                .selectFirst(
-                    "span.dt_rating_vgs"
-                )
-                ?.text()
-                ?.trim()
-                ?.toRatingInt()
-
-        var duration =
-            document
-                .selectFirst(
-                    "span.runtime"
-                )
-                ?.text()
-                ?.split(" ")
-                ?.first()
-                ?.trim()
-                ?.toIntOrNull()
+                .filter {
+                    it.isNotBlank()
+                }
+                .distinct()
 
         val recommendations =
             document
@@ -205,47 +210,27 @@ class SetFilmizleProvider : MainAPI() {
             document
                 .select("span.valor a")
                 .map {
-                    Actor(it.text())
+                    Actor(it.text().trim())
                 }
 
         val trailer =
             Regex(
-                """embed/(.*)\?rel"""
+                """embed/(.*?)(?:\?rel|["'])"""
             )
                 .find(document.html())
                 ?.groupValues
-                ?.get(1)
+                ?.getOrNull(1)
                 ?.let {
                     "https://www.youtube.com/embed/$it"
                 }
 
-        // DİZİ
-        if (
+        val isSeries =
             url.contains(
                 "/dizi/",
                 ignoreCase = true
             )
-        ) {
 
-            year =
-                document
-                    .selectFirst(
-                        "a[href*='/yil/']"
-                    )
-                    ?.text()
-                    ?.trim()
-                    ?.toIntOrNull()
-
-            duration =
-                document
-                    .selectFirst(
-                        "div#info span:containsOwn(Dakika)"
-                    )
-                    ?.text()
-                    ?.split(" ")
-                    ?.first()
-                    ?.trim()
-                    ?.toIntOrNull()
+        if (isSeries) {
 
             val episodes =
                 document
@@ -266,42 +251,33 @@ class SetFilmizleProvider : MainAPI() {
                             )
                                 ?: return@mapNotNull null
 
-                        val episodeName =
-                            episodeLink
-                                .ownText()
-                                .trim()
-
-                        val episodeDetail =
-                            episodeLink
-                                .ownText()
-                                .trim()
+                        val text =
+                            episodeLink.text().trim()
 
                         val season =
                             Regex(
-                                """(\d+)\.\s*Sezon"""
+                                """(?i)(\d+)\.\s*Sezon"""
                             )
-                                .find(
-                                    episodeDetail
-                                )
+                                .find(text)
                                 ?.groupValues
-                                ?.get(1)
+                                ?.getOrNull(1)
                                 ?.toIntOrNull()
+                                ?: 1
 
                         val episode =
                             Regex(
-                                """Sezon\s+\d+\.\s*Bölüm\s+(\d+)"""
+                                """(?i)Bölüm\s+(\d+)"""
                             )
-                                .find(
-                                    episodeDetail
-                                )
+                                .find(text)
                                 ?.groupValues
-                                ?.get(1)
+                                ?.getOrNull(1)
                                 ?.toIntOrNull()
+                                ?: 1
 
                         newEpisode(
                             episodeUrl
                         ) {
-                            this.name = episodeName
+                            this.name = text
                             this.season = season
                             this.episode = episode
                         }
@@ -318,8 +294,6 @@ class SetFilmizleProvider : MainAPI() {
                 plot = description
                 this.year = year
                 this.tags = tags
-                this.rating = rating
-                this.duration = duration
                 this.recommendations = recommendations
 
                 addActors(actors)
@@ -327,7 +301,6 @@ class SetFilmizleProvider : MainAPI() {
             }
         }
 
-        // FİLM
         return newMovieLoadResponse(
             name = title,
             url = url,
@@ -339,8 +312,6 @@ class SetFilmizleProvider : MainAPI() {
             plot = description
             this.year = year
             this.tags = tags
-            this.rating = rating
-            this.duration = duration
             this.recommendations = recommendations
 
             addActors(actors)
@@ -351,22 +322,34 @@ class SetFilmizleProvider : MainAPI() {
     private fun Element.toRecommendationResult():
         SearchResponse? {
 
-        val title =
-            selectFirst("a img")
-                ?.attr("alt")
+        val linkElement =
+            selectFirst("a")
                 ?: return null
 
         val href =
             fixUrlNull(
-                selectFirst("a")
-                    ?.attr("href")
+                linkElement.attr("href")
             )
                 ?: return null
 
+        val image =
+            linkElement.selectFirst("img")
+
+        val title =
+            image
+                ?.attr("alt")
+                ?.trim()
+                ?: linkElement
+                    .text()
+                    .trim()
+
+        if (title.isBlank()) {
+            return null
+        }
+
         val poster =
             fixUrlNull(
-                selectFirst("a img")
-                    ?.attr("data-src")
+                image?.attr("data-src")
             )
 
         return if (
