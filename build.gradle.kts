@@ -78,10 +78,10 @@ subprojects {
 
         cloudstream("com.lagradost:cloudstream3:pre-release")
 
-        implementation(kotlin("stdlib"))
-        implementation("com.github.Blatzar:NiceHttp:0.4.11")
-        implementation("org.jsoup:jsoup:1.18.3")
-        implementation(
+        add("implementation", kotlin("stdlib"))
+        add("implementation", "com.github.Blatzar:NiceHttp:0.4.11")
+        add("implementation", "org.jsoup:jsoup:1.18.3")
+        add("implementation", "com.fasterxml.jackson.module:jackson-module-kotlin:2.13.1")
             "com.fasterxml.jackson.module:jackson-module-kotlin:2.13.1"
         )
     }
