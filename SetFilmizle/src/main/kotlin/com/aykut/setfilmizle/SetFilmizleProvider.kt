@@ -1,8 +1,14 @@
 package com.aykut.setfilmizle
 
-import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.utils.AppUtils.toJson
-import org.jsoup.Jsoup
+import com.lagradost.cloudstream3.MainAPI
+import com.lagradost.cloudstream3.SearchResponse
+import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.LoadResponse
+import com.lagradost.cloudstream3.newMovieSearchResponse
+import com.lagradost.cloudstream3.newTvSeriesSearchResponse
+import com.lagradost.cloudstream3.newMovieLoadResponse
+import com.lagradost.cloudstream3.newTvSeriesLoadResponse
+import com.lagradost.cloudstream3.app
 import java.net.URLEncoder
 
 class SetFilmizleProvider : MainAPI() {
@@ -11,7 +17,7 @@ class SetFilmizleProvider : MainAPI() {
 
     override var mainUrl = "https://www.setfilmizle.ltd"
 
-    override val lang = "tr"
+    override var lang = "tr"
 
     override val supportedTypes = setOf(
         TvType.Movie,
@@ -29,8 +35,7 @@ class SetFilmizleProvider : MainAPI() {
             "UTF-8"
         )
 
-        val searchUrl =
-            "$mainUrl/?s=$encodedQuery"
+        val searchUrl = "$mainUrl/?s=$encodedQuery"
 
         val response = app.get(searchUrl)
 
@@ -55,7 +60,7 @@ class SetFilmizleProvider : MainAPI() {
                         .selectFirst("a[href]")
                         ?.text()
                         ?.trim()
-                        ?: return@mapNotNull null
+                    ?: return@mapNotNull null
 
                 if (title.isBlank()) {
                     return@mapNotNull null
@@ -69,7 +74,9 @@ class SetFilmizleProvider : MainAPI() {
                                 img.attr("src")
                             }
                     }
-                    ?.takeIf { it.isNotBlank() }
+                    ?.takeIf {
+                        it.isNotBlank()
+                    }
 
                 val isSeries =
                     link.contains(
@@ -79,20 +86,19 @@ class SetFilmizleProvider : MainAPI() {
                     link.contains(
                         "/series/",
                         ignoreCase = true
-                    ) ||
-                    title.contains(
-                        "dizi",
-                        ignoreCase = true
                     )
 
                 if (isSeries) {
+
                     newTvSeriesSearchResponse(
                         name = title,
                         url = link
                     ) {
                         posterUrl = poster
                     }
+
                 } else {
+
                     newMovieSearchResponse(
                         name = title,
                         url = link
@@ -101,39 +107,42 @@ class SetFilmizleProvider : MainAPI() {
                     }
                 }
             }
-            .distinctBy { it.url }
+            .distinctBy {
+                it.url
+            }
     }
 
     override suspend fun load(
         url: String
     ): LoadResponse? {
 
-        val document = app.get(url).document
+        val document = app
+            .get(url)
+            .document
 
-        val title =
-            document
-                .selectFirst(
-                    "h1.entry-title, h1.title, h1"
-                )
-                ?.text()
-                ?.trim()
-                ?: return null
+        val title = document
+            .selectFirst(
+                "h1.entry-title, h1.title, h1"
+            )
+            ?.text()
+            ?.trim()
+            ?: return null
 
-        val poster =
-            document
-                .selectFirst(
-                    "meta[property=og:image]"
-                )
-                ?.attr("content")
-                ?.takeIf { it.isNotBlank() }
+        val poster = document
+            .selectFirst(
+                "meta[property=og:image]"
+            )
+            ?.attr("content")
+            ?.takeIf {
+                it.isNotBlank()
+            }
 
-        val description =
-            document
-                .selectFirst(
-                    "meta[property=og:description]"
-                )
-                ?.attr("content")
-                ?.trim()
+        val description = document
+            .selectFirst(
+                "meta[property=og:description]"
+            )
+            ?.attr("content")
+            ?.trim()
 
         val isSeries =
             url.contains(
@@ -169,28 +178,5 @@ class SetFilmizleProvider : MainAPI() {
                 plot = description
             }
         }
-    }
-
-    override suspend fun loadLinks(
-        data: String,
-        isCasting: Boolean,
-        subtitleCallback: (
-            SubtitleFile
-        ) -> Unit,
-        callback: (
-            ExtractorLink
-        ) -> Unit
-    ): Boolean {
-
-        /*
-         * Stream çözümleme burada özellikle
-         * uygulanmıyor.
-         *
-         * Yetkili/açık bir video kaynağı
-         * kullanıyorsan bu bölüm ayrıca
-         * uygulanabilir.
-         */
-
-        return false
     }
 }
