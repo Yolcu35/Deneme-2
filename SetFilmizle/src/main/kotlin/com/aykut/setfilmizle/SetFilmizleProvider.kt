@@ -12,30 +12,25 @@ import com.lagradost.cloudstream3.newTvSeriesLoadResponse
 import com.lagradost.cloudstream3.newTvSeriesSearchResponse
 import org.json.JSONObject
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
 class SetFilmizleProvider : MainAPI() {
 
-    override var mainUrl: String =
-        "https://www.setfilmizle.ltd"
+    override var mainUrl: String = "https://www.setfilmizle.ltd"
 
-    override var name: String =
-        "SetFilmizle"
+    override var name: String = "SetFilmizle"
 
-    override var lang: String =
-        "tr"
+    override var lang: String = "tr"
 
-    override val hasMainPage: Boolean =
-        false
+    override val hasMainPage: Boolean = false
 
-    override val hasQuickSearch: Boolean =
-        false
+    override val hasQuickSearch: Boolean = false
 
-    override val supportedTypes: Set<TvType> =
-        setOf(
-            TvType.Movie,
-            TvType.TvSeries
-        )
+    override val supportedTypes: Set<TvType> = setOf(
+        TvType.Movie,
+        TvType.TvSeries
+    )
 
     override suspend fun search(
         query: String
@@ -47,9 +42,7 @@ class SetFilmizleProvider : MainAPI() {
             return emptyList()
         }
 
-        val homeHtml = home.text
-
-        val nonce = findNonce(homeHtml)
+        val nonce = findNonce(home.text)
             ?: return emptyList()
 
         val response = app.post(
@@ -81,16 +74,67 @@ class SetFilmizleProvider : MainAPI() {
             return emptyList()
         }
 
-        val document = Jsoup.parse(html)
+        val document: Document = Jsoup.parse(html)
 
-        return document
-            .select("div.items article")
-            .mapNotNull { article ->
-                parseSearchResult(article)
+        val results = ArrayList<SearchResponse>()
+
+        for (article in document.select("div.items article")) {
+
+            val link: Element =
+                article.selectFirst("a[href]")
+                    ?: continue
+
+            val rawUrl: String =
+                link.attr("href").trim()
+
+            if (rawUrl.isBlank()) {
+                continue
             }
-            .distinctBy { result ->
-                result.url
+
+            val url: String =
+                absoluteUrl(rawUrl)
+
+            val title: String =
+                article.selectFirst("h2")
+                    ?.text()
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
+                    ?: link.text().trim()
+
+            if (title.isBlank()) {
+                continue
             }
+
+            val poster: String? =
+                getImageUrl(article)
+
+            if (isSeriesUrl(url)) {
+
+                results.add(
+                    newTvSeriesSearchResponse(
+                        name = title,
+                        url = url,
+                        type = TvType.TvSeries
+                    ) {
+                        posterUrl = poster
+                    }
+                )
+
+            } else {
+
+                results.add(
+                    newMovieSearchResponse(
+                        name = title,
+                        url = url,
+                        type = TvType.Movie
+                    ) {
+                        posterUrl = poster
+                    }
+                )
+            }
+        }
+
+        return results.distinctBy { it.url }
     }
 
     private fun findNonce(
@@ -104,8 +148,8 @@ class SetFilmizleProvider : MainAPI() {
         )
 
         for (pattern in patterns) {
-            val match = Regex(pattern)
-                .find(html)
+
+            val match = Regex(pattern).find(html)
 
             if (match != null) {
                 return match.groupValues[1]
@@ -115,51 +159,28 @@ class SetFilmizleProvider : MainAPI() {
         return null
     }
 
-    private fun parseSearchResult(
-        element: Element
-    ): SearchResponse? {
+    private fun absoluteUrl(
+        url: String
+    ): String {
 
-        val link = element
-            .selectFirst("a[href]")
-            ?: return null
+        val cleanUrl = url.trim()
 
-        val url = fixUrlNull(
-            link.attr("href")
-        ) ?: return null
+        return when {
 
-        val title = element
-            .selectFirst("h2")
-            ?.text()
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
-            ?: link.text()
-                .trim()
-                .takeIf { it.isNotBlank() }
-            ?: return null
+            cleanUrl.startsWith("http://") ->
+                cleanUrl
 
-        val poster = getImageUrl(element)
+            cleanUrl.startsWith("https://") ->
+                cleanUrl
 
-        val isSeries = isSeriesUrl(url)
+            cleanUrl.startsWith("//") ->
+                "https:$cleanUrl"
 
-        return if (isSeries) {
+            cleanUrl.startsWith("/") ->
+                mainUrl + cleanUrl
 
-            newTvSeriesSearchResponse(
-                name = title,
-                url = url,
-                type = TvType.TvSeries
-            ) {
-                posterUrl = poster
-            }
-
-        } else {
-
-            newMovieSearchResponse(
-                name = title,
-                url = url,
-                type = TvType.Movie
-            ) {
-                posterUrl = poster
-            }
+            else ->
+                "$mainUrl/$cleanUrl"
         }
     }
 
@@ -167,9 +188,9 @@ class SetFilmizleProvider : MainAPI() {
         element: Element
     ): String? {
 
-        val image = element
-            .selectFirst("img")
-            ?: return null
+        val image: Element =
+            element.selectFirst("img")
+                ?: return null
 
         val attributes = listOf(
             "data-src",
@@ -185,7 +206,7 @@ class SetFilmizleProvider : MainAPI() {
                 .trim()
 
             if (value.isNotBlank()) {
-                return fixUrlNull(value)
+                return absoluteUrl(value)
             }
         }
 
@@ -202,69 +223,100 @@ class SetFilmizleProvider : MainAPI() {
             return null
         }
 
-        val document = response.document
+        val document: Document =
+            response.document
 
-        val title = document
-            .selectFirst(
+        val titleElement: Element =
+            document.selectFirst(
                 "h1.entry-title, h1.post-title, h1"
             )
-            ?.text()
-            ?.trim()
-            ?.removeSuffix(" izle")
-            ?.trim()
-            ?: return null
+                ?: return null
 
-        val poster = document
-            .selectFirst(
-                "div.poster img, meta[property='og:image']"
+        val title: String =
+            titleElement
+                .text()
+                .trim()
+                .removeSuffix(" izle")
+                .trim()
+
+        if (title.isBlank()) {
+            return null
+        }
+
+        val posterElement: Element? =
+            document.selectFirst(
+                "div.poster img"
             )
-            ?.let { element ->
 
-                if (element.tagName() == "meta") {
-                    element.attr("content")
+        val poster: String? =
+            if (posterElement != null) {
+
+                val src = posterElement
+                    .attr("src")
+                    .trim()
+
+                if (src.isNotBlank()) {
+                    absoluteUrl(src)
                 } else {
-                    element.attr("src")
-                        .ifBlank {
-                            element.attr("data-src")
-                        }
+
+                    val dataSrc = posterElement
+                        .attr("data-src")
+                        .trim()
+
+                    if (dataSrc.isNotBlank()) {
+                        absoluteUrl(dataSrc)
+                    } else {
+                        null
+                    }
                 }
 
-            }
-            ?.trim()
-            ?.let { image ->
-                fixUrlNull(image)
+            } else {
+
+                val ogImage: Element? =
+                    document.selectFirst(
+                        "meta[property='og:image']"
+                    )
+
+                val content =
+                    ogImage
+                        ?.attr("content")
+                        ?.trim()
+                        ?: ""
+
+                if (content.isNotBlank()) {
+                    absoluteUrl(content)
+                } else {
+                    null
+                }
             }
 
-        val description = document
-            .selectFirst(
+        val description: String? =
+            document.selectFirst(
                 "div.wp-content p, .description, .plot"
             )
-            ?.text()
-            ?.trim()
+                ?.text()
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
 
-        val year = document
-            .selectFirst(
+        val year: Int? =
+            document.selectFirst(
                 "div.extra span.C a, a[href*='/yil/']"
             )
-            ?.text()
-            ?.trim()
-            ?.toIntOrNull()
+                ?.text()
+                ?.trim()
+                ?.toIntOrNull()
 
-        val tags = document
-            .select(
+        val tags: List<String> =
+            document.select(
                 "div.sgeneros a, .genres a, .genre a"
             )
-            .map {
-                it.text().trim()
-            }
-            .filter {
-                it.isNotBlank()
-            }
-            .distinct()
+                .map { it.text().trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
 
-        return if (isSeriesUrl(url)) {
+        if (isSeriesUrl(url)) {
 
-            loadSeries(
+            return loadSeries(
                 url = url,
                 title = title,
                 poster = poster,
@@ -273,58 +325,64 @@ class SetFilmizleProvider : MainAPI() {
                 tags = tags,
                 document = document
             )
+        }
 
-        } else {
+        return newMovieLoadResponse(
+            name = title,
+            url = url,
+            type = TvType.Movie,
+            dataUrl = url
+        ) {
 
-            newMovieLoadResponse(
-                name = title,
-                url = url,
-                type = TvType.Movie,
-                dataUrl = url
-            ) {
-
-                posterUrl = poster
-                plot = description
-                this.year = year
-                this.tags = tags
-            }
+            posterUrl = poster
+            plot = description
+            this.year = year
+            this.tags = tags
         }
     }
 
-    private fun loadSeries(
+    private suspend fun loadSeries(
         url: String,
         title: String,
         poster: String?,
         description: String?,
         year: Int?,
         tags: List<String>,
-        document: org.jsoup.nodes.Document
+        document: Document
     ): LoadResponse {
 
-        val episodes = document
-            .select(
-                "div#episodes ul.episodios li"
-            )
-            .mapNotNull { element ->
+        val episodes = ArrayList<com.lagradost.cloudstream3.Episode>()
 
-                val link = element
-                    .selectFirst(
-                        "h4.episodiotitle a[href]"
-                    )
-                    ?: element.selectFirst(
-                        "a[href]"
-                    )
-                    ?: return@mapNotNull null
+        for (element in document.select(
+            "div#episodes ul.episodios li"
+        )) {
 
-                val episodeUrl = fixUrlNull(
-                    link.attr("href")
-                ) ?: return@mapNotNull null
+            val link: Element =
+                element.selectFirst(
+                    "h4.episodiotitle a[href]"
+                )
+                    ?: element.selectFirst("a[href]")
+                    ?: continue
 
-                val episodeText = link
-                    .text()
-                    .trim()
+            val rawEpisodeUrl: String =
+                link.attr("href").trim()
 
-                val season = Regex(
+            if (rawEpisodeUrl.isBlank()) {
+                continue
+            }
+
+            val episodeUrl =
+                absoluteUrl(rawEpisodeUrl)
+
+            val episodeText =
+                link.text().trim()
+
+            if (episodeText.isBlank()) {
+                continue
+            }
+
+            val season: Int =
+                Regex(
                     """(?i)(\d+)\.\s*Sezon"""
                 )
                     .find(episodeText)
@@ -333,7 +391,8 @@ class SetFilmizleProvider : MainAPI() {
                     ?.toIntOrNull()
                     ?: 1
 
-                val episode = Regex(
+            val episode: Int =
+                Regex(
                     """(?i)Bölüm\s*(\d+)"""
                 )
                     .find(episodeText)
@@ -342,6 +401,7 @@ class SetFilmizleProvider : MainAPI() {
                     ?.toIntOrNull()
                     ?: 1
 
+            episodes.add(
                 newEpisode(
                     data = episodeUrl
                 ) {
@@ -349,7 +409,8 @@ class SetFilmizleProvider : MainAPI() {
                     this.season = season
                     this.episode = episode
                 }
-            }
+            )
+        }
 
         return newTvSeriesLoadResponse(
             name = title,
