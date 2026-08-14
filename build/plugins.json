@@ -1,0 +1,23 @@
+[
+    {
+        "iconUrl": "https://www.setfilmizle.ltd/favicon.ico",
+        "fileHash": "sha256-76cd20879cee31384bcb016675232a31d065f313a4824715a23747d9eebeed03",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/Yolcu35/Deneme-2",
+        "fileSize": 2317,
+        "status": 3,
+        "language": "tr",
+        "authors": [
+            "Yolcu35"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries"
+        ],
+        "version": 1,
+        "internalName": "SetFilmizle",
+        "description": "SetFilmizle provider",
+        "url": "https://raw.githubusercontent.com/Yolcu35/Deneme-2/builds/SetFilmizle.cs3",
+        "name": "SetFilmizle"
+    }
+]
