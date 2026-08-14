@@ -1,14 +1,6 @@
 package com.aykut.setfilmizle
 
-import com.lagradost.cloudstream3.LoadResponse
-import com.lagradost.cloudstream3.MainAPI
-import com.lagradost.cloudstream3.SearchResponse
-import com.lagradost.cloudstream3.TvType
-import com.lagradost.cloudstream3.app
-import com.lagradost.cloudstream3.newMovieLoadResponse
-import com.lagradost.cloudstream3.newMovieSearchResponse
-import com.lagradost.cloudstream3.newTvSeriesLoadResponse
-import com.lagradost.cloudstream3.newTvSeriesSearchResponse
+import com.lagradost.cloudstream3.*
 import java.net.URLEncoder
 
 class SetFilmizleProvider : MainAPI() {
@@ -26,14 +18,18 @@ class SetFilmizleProvider : MainAPI() {
 
     override val hasMainPage: Boolean = false
 
+    // ---------------------------------------------------------
+    // SEARCH
+    // ---------------------------------------------------------
+
     override suspend fun search(
         query: String
     ): List<SearchResponse> {
 
-        val encodedQuery: String =
+        val encodedQuery =
             URLEncoder.encode(query, "UTF-8")
 
-        val searchUrl: String =
+        val searchUrl =
             "$mainUrl/?s=$encodedQuery"
 
         val document =
@@ -42,97 +38,147 @@ class SetFilmizleProvider : MainAPI() {
         val results =
             ArrayList<SearchResponse>()
 
-        document
-            .select("article, .post, .film, .movie, .item")
-            .forEach { element ->
+        /*
+         * SetFilmizle'deki sonuç kartlarını yakalamaya
+         * çalışıyoruz.
+         */
+        val cards = document.select(
+            "article, .post-item, .item, .film, .movie-item, " +
+            ".film-item, .film-card, .movie, .item-film"
+        )
 
-                val linkElement =
-                    element.selectFirst("a[href]")
+        cards.forEach { card ->
 
-                if (linkElement == null) {
-                    return@forEach
-                }
+            val linkElement =
+                card.selectFirst("a[href]")
 
-                val link: String =
-                    linkElement.attr("href")
+            if (linkElement == null) {
+                return@forEach
+            }
 
-                if (link.isBlank()) {
-                    return@forEach
-                }
+            val href =
+                linkElement.attr("href").trim()
 
-                val titleElement =
-                    element.selectFirst(
-                        "h1, h2, h3, h4, .title, .entry-title"
-                    )
+            if (href.isBlank()) {
+                return@forEach
+            }
 
-                val title: String =
-                    titleElement?.text()?.trim()
-                        ?: linkElement.text().trim()
+            val titleElement =
+                card.selectFirst(
+                    "h1, h2, h3, h4, h5, " +
+                    ".title, .film-title, .movie-title, " +
+                    ".post-title, .entry-title"
+                )
 
-                if (title.isBlank()) {
-                    return@forEach
-                }
+            val title =
+                titleElement
+                    ?.text()
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
+                    ?: linkElement
+                        .text()
+                        .trim()
 
-                val imageElement =
-                    element.selectFirst("img")
+            if (title.isBlank()) {
+                return@forEach
+            }
 
-                val poster: String? =
-                    if (imageElement != null) {
-                        val dataSrc =
-                            imageElement.attr("data-src")
+            val image =
+                card.selectFirst("img")
 
-                        if (dataSrc.isNotBlank()) {
-                            dataSrc
+            val poster: String? =
+                if (image != null) {
+
+                    val dataSrc =
+                        image.attr("data-src")
+
+                    if (dataSrc.isNotBlank()) {
+                        dataSrc
+                    } else {
+
+                        val lazySrc =
+                            image.attr("data-lazy-src")
+
+                        if (lazySrc.isNotBlank()) {
+                            lazySrc
                         } else {
+
                             val src =
-                                imageElement.attr("src")
+                                image.attr("src")
 
                             src.ifBlank {
                                 null
                             }
                         }
-                    } else {
-                        null
                     }
 
-                val isSeries: Boolean =
-                    link.contains(
-                        "/dizi/",
-                        ignoreCase = true
-                    ) ||
-                    link.contains(
-                        "/series/",
-                        ignoreCase = true
-                    )
-
-                if (isSeries) {
-
-                    results.add(
-                        newTvSeriesSearchResponse(
-                            name = title,
-                            url = link
-                        ) {
-                            posterUrl = poster
-                        }
-                    )
-
                 } else {
-
-                    results.add(
-                        newMovieSearchResponse(
-                            name = title,
-                            url = link
-                        ) {
-                            posterUrl = poster
-                        }
-                    )
+                    null
                 }
+
+            val fullUrl =
+                when {
+                    href.startsWith("http://") ->
+                        href
+
+                    href.startsWith("https://") ->
+                        href
+
+                    href.startsWith("/") ->
+                        mainUrl + href
+
+                    else ->
+                        "$mainUrl/$href"
+                }
+
+            val text =
+                card.text().lowercase()
+
+            val isSeries =
+                text.contains("dizi") ||
+                text.contains("sezon") ||
+                text.contains("bölüm") ||
+                fullUrl.contains(
+                    "/dizi/",
+                    ignoreCase = true
+                ) ||
+                fullUrl.contains(
+                    "/series/",
+                    ignoreCase = true
+                )
+
+            if (isSeries) {
+
+                results.add(
+                    newTvSeriesSearchResponse(
+                        name = title,
+                        url = fullUrl
+                    ) {
+                        posterUrl = poster
+                    }
+                )
+
+            } else {
+
+                results.add(
+                    newMovieSearchResponse(
+                        name = title,
+                        url = fullUrl
+                    ) {
+                        posterUrl = poster
+                    }
+                )
             }
+        }
 
         return results.distinctBy {
             it.url
         }
     }
+
+    // ---------------------------------------------------------
+    // LOAD
+    // ---------------------------------------------------------
 
     override suspend fun load(
         url: String
@@ -141,41 +187,64 @@ class SetFilmizleProvider : MainAPI() {
         val document =
             app.get(url).document
 
-        val titleElement =
-            document.selectFirst(
-                "h1.entry-title, h1.title, h1"
-            )
-
-        val title: String =
-            titleElement?.text()?.trim()
+        val title =
+            document
+                .selectFirst(
+                    "h1.entry-title, " +
+                    "h1.post-title, " +
+                    "h1.title, " +
+                    "h1"
+                )
+                ?.text()
+                ?.trim()
                 ?: return null
 
-        val imageElement =
-            document.selectFirst(
-                "meta[property=og:image]"
-            )
-
-        val poster: String? =
-            imageElement
+        val poster =
+            document
+                .selectFirst(
+                    "meta[property=og:image]"
+                )
                 ?.attr("content")
                 ?.takeIf {
                     it.isNotBlank()
                 }
 
-        val descriptionElement =
-            document.selectFirst(
-                "meta[property=og:description]"
-            )
-
-        val description: String? =
-            descriptionElement
+        val description =
+            document
+                .selectFirst(
+                    "meta[property=og:description]"
+                )
                 ?.attr("content")
                 ?.trim()
                 ?.takeIf {
                     it.isNotBlank()
                 }
 
-        val isSeries: Boolean =
+        val year =
+            document
+                .selectFirst(
+                    ".year, .release-year, " +
+                    ".film-year, .movie-year"
+                )
+                ?.text()
+                ?.trim()
+                ?.toIntOrNull()
+
+        val genres =
+            document
+                .select(
+                    ".genre a, .genres a, " +
+                    ".category a, .categories a"
+                )
+                .map {
+                    it.text().trim()
+                }
+                .filter {
+                    it.isNotBlank()
+                }
+                .distinct()
+
+        val isSeries =
             url.contains(
                 "/dizi/",
                 ignoreCase = true
@@ -183,31 +252,144 @@ class SetFilmizleProvider : MainAPI() {
             url.contains(
                 "/series/",
                 ignoreCase = true
-            )
+            ) ||
+            document
+                .text()
+                .contains(
+                    "sezon",
+                    ignoreCase = true
+                )
 
-        return if (isSeries) {
+        if (!isSeries) {
 
-            newTvSeriesLoadResponse(
-                name = title,
-                url = url,
-                type = TvType.TvSeries,
-                episodes = emptyList()
-            ) {
-                posterUrl = poster
-                plot = description
-            }
-
-        } else {
-
-            newMovieLoadResponse(
+            return newMovieLoadResponse(
                 name = title,
                 url = url,
                 type = TvType.Movie,
                 dataUrl = url
             ) {
+
                 posterUrl = poster
+
                 plot = description
+
+                this.year = year
+
+                this.tags = genres
             }
+        }
+
+        // -----------------------------------------------------
+        // TV SERIES
+        // -----------------------------------------------------
+
+        val episodes =
+            ArrayList<ExtractorLink>()
+
+        /*
+         * Bölümleri bulmak için sayfadaki bağlantıları
+         * tarıyoruz.
+         *
+         * Burada video/stream linklerini çözmüyoruz.
+         */
+        val episodeLinks =
+            document.select(
+                "a[href]"
+            )
+
+        val parsedEpisodes =
+            ArrayList<Episode>()
+
+        episodeLinks.forEach { element ->
+
+            val href =
+                element.attr("href").trim()
+
+            val text =
+                element.text().trim()
+
+            if (
+                href.isBlank() ||
+                text.isBlank()
+            ) {
+                return@forEach
+            }
+
+            val combined =
+                "$text $href"
+
+            val seasonMatch =
+                Regex(
+                    "(?i)(?:sezon|season)[\\s._-]*(\\d+)"
+                ).find(combined)
+
+            val episodeMatch =
+                Regex(
+                    "(?i)(?:bölüm|bolum|episode|ep)[\\s._-]*(\\d+)"
+                ).find(combined)
+
+            if (
+                seasonMatch != null &&
+                episodeMatch != null
+            ) {
+
+                val season =
+                    seasonMatch
+                        .groupValues[1]
+                        .toIntOrNull()
+                        ?: return@forEach
+
+                val episode =
+                    episodeMatch
+                        .groupValues[1]
+                        .toIntOrNull()
+                        ?: return@forEach
+
+                val episodeUrl =
+                    when {
+
+                        href.startsWith("http://") ->
+                            href
+
+                        href.startsWith("https://") ->
+                            href
+
+                        href.startsWith("/") ->
+                            mainUrl + href
+
+                        else ->
+                            "$mainUrl/$href"
+                    }
+
+                parsedEpisodes.add(
+                    newEpisode(
+                        episodeUrl
+                    ) {
+
+                        name = text
+
+                        season = season
+
+                        episode = episode
+                    }
+                )
+            }
+        }
+
+        return newTvSeriesLoadResponse(
+            name = title,
+            url = url,
+            type = TvType.TvSeries,
+            episodes = parsedEpisodes
+        ) {
+
+            posterUrl = poster
+
+            plot = description
+
+            this.year = year
+
+            this.tags = genres
         }
     }
 }
