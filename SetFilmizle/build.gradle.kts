@@ -1,11 +1,32 @@
-version = 1
+plugins {
+    id("com.android.library")
+    kotlin("android")
+    id("com.lagradost.cloudstream3.gradle")
+}
 
 cloudstream {
-    description = "SetFilmizle provider"
-    authors = listOf("Yolcu35")
-    status = 3
-    tvTypes = listOf("Movie", "TvSeries")
-    requiresResources = false
-    language = "tr"
-    iconUrl = "https://www.setfilmizle.ltd/favicon.ico"
+    setRepo(System.getenv("GITHUB_REPOSITORY") ?: "https://github.com/KullanciAdiniz/DepoAdiniz")
+}
+
+android {
+    namespace = "com.aykut.setfilmizle"
+    compileSdk = 35
+
+    defaultConfig {
+        minSdk = 21
+        targetSdk = 35
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
+}
+
+dependencies {
+    implementation("com.github.recloudstream.cloudstream:library:-SNAPSHOT")
 }
