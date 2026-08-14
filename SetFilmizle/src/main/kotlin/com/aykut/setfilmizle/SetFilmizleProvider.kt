@@ -1,168 +1,126 @@
 package com.aykut.setfilmizle
 
-import com.lagradost.cloudstream3.LoadResponse
-import com.lagradost.cloudstream3.MainAPI
-import com.lagradost.cloudstream3.SearchResponse
-import com.lagradost.cloudstream3.TvType
-import com.lagradost.cloudstream3.app
-import com.lagradost.cloudstream3.newMovieLoadResponse
-import com.lagradost.cloudstream3.newMovieSearchResponse
-import com.lagradost.cloudstream3.newTvSeriesLoadResponse
-import com.lagradost.cloudstream3.newTvSeriesSearchResponse
-import java.net.URLEncoder
+import com.lagradost.cloudstream3.*
+import com.lagradost.cloudstream3.LoadResponse.Companion.addActors
+import com.lagradost.cloudstream3.LoadResponse.Companion.addTrailer
+import com.lagradost.cloudstream3.utils.toRatingInt
+import org.json.JSONObject
+import org.jsoup.Jsoup
+import org.jsoup.nodes.Element
 
 class SetFilmizleProvider : MainAPI() {
 
-    override var name: String = "SetFilmizle"
+    override var mainUrl = "https://www.setfilmizle.ltd"
 
-    override var mainUrl: String = "https://www.setfilmizle.ltd"
+    override var name = "SetFilmizle"
 
-    override var lang: String = "tr"
+    override var lang = "tr"
+
+    override val hasMainPage = false
+
+    override val hasQuickSearch = false
 
     override val supportedTypes = setOf(
         TvType.Movie,
         TvType.TvSeries
     )
 
-    override val hasMainPage: Boolean = false
-
     override suspend fun search(
         query: String
     ): List<SearchResponse> {
 
-        val encodedQuery =
-            URLEncoder.encode(query, "UTF-8")
+        val mainPage =
+            app.get(mainUrl).document
 
-        val searchUrl =
-            "$mainUrl/?s=$encodedQuery"
+        val nonce =
+            Regex("""nonce:\s*['"]([^'"]+)['"]""")
+                .find(mainPage.html())
+                ?.groupValues
+                ?.get(1)
+                ?: return emptyList()
+
+        val response =
+            app.post(
+                url = "$mainUrl/wp-admin/admin-ajax.php",
+                headers = mapOf(
+                    "X-Requested-With" to "XMLHttpRequest"
+                ),
+                data = mapOf(
+                    "action" to "ajax_search",
+                    "nonce" to nonce,
+                    "search" to query
+                )
+            )
+
+        if (!response.isSuccessful) {
+            return emptyList()
+        }
+
+        val json =
+            JSONObject(response.text)
+
+        val html =
+            json.optString("html")
+
+        if (html.isBlank()) {
+            return emptyList()
+        }
 
         val document =
-            app.get(searchUrl).document
+            Jsoup.parse(html)
 
-        val results =
-            ArrayList<SearchResponse>()
+        return document
+            .select("div.items article")
+            .mapNotNull {
+                it.toSearchResult()
+            }
+    }
 
-        document
-            .select("article, .post-item, .item, .film, .movie-item, .film-item, .film-card, .movie")
-            .forEach { card ->
+    private fun Element.toSearchResult(): SearchResponse? {
 
-                val linkElement =
-                    card.selectFirst("a[href]")
-                    ?: return@forEach
+        val title =
+            selectFirst("h2")
+                ?.text()
+                ?.trim()
+                ?: return null
 
-                val href =
-                    linkElement.attr("href").trim()
+        val href =
+            fixUrlNull(
+                selectFirst("a")
+                    ?.attr("href")
+            )
+                ?: return null
 
-                if (href.isBlank()) {
-                    return@forEach
-                }
+        val poster =
+            fixUrlNull(
+                selectFirst("img")
+                    ?.attr("data-src")
+            )
 
-                val titleElement =
-                    card.selectFirst(
-                        "h1, h2, h3, h4, h5, .title, .film-title, .movie-title, .post-title, .entry-title"
-                    )
+        return if (
+            href.contains(
+                "/dizi/",
+                ignoreCase = true
+            )
+        ) {
 
-                val title =
-                    titleElement
-                        ?.text()
-                        ?.trim()
-                        ?.takeIf { it.isNotBlank() }
-                        ?: linkElement.text().trim()
-
-                if (title.isBlank()) {
-                    return@forEach
-                }
-
-                val image =
-                    card.selectFirst("img")
-
-                val poster: String? =
-                    if (image != null) {
-
-                        val dataSrc =
-                            image.attr("data-src")
-
-                        if (dataSrc.isNotBlank()) {
-                            dataSrc
-                        } else {
-
-                            val lazySrc =
-                                image.attr("data-lazy-src")
-
-                            if (lazySrc.isNotBlank()) {
-                                lazySrc
-                            } else {
-
-                                val src =
-                                    image.attr("src")
-
-                                src.ifBlank {
-                                    null
-                                }
-                            }
-                        }
-
-                    } else {
-                        null
-                    }
-
-                val fullUrl =
-                    when {
-                        href.startsWith("http://") ->
-                            href
-
-                        href.startsWith("https://") ->
-                            href
-
-                        href.startsWith("/") ->
-                            mainUrl + href
-
-                        else ->
-                            "$mainUrl/$href"
-                    }
-
-                val cardText =
-                    card.text().lowercase()
-
-                val isSeries =
-                    cardText.contains("dizi") ||
-                    cardText.contains("sezon") ||
-                    cardText.contains("bölüm") ||
-                    fullUrl.contains(
-                        "/dizi/",
-                        ignoreCase = true
-                    ) ||
-                    fullUrl.contains(
-                        "/series/",
-                        ignoreCase = true
-                    )
-
-                if (isSeries) {
-
-                    results.add(
-                        newTvSeriesSearchResponse(
-                            name = title,
-                            url = fullUrl
-                        ) {
-                            posterUrl = poster
-                        }
-                    )
-
-                } else {
-
-                    results.add(
-                        newMovieSearchResponse(
-                            name = title,
-                            url = fullUrl
-                        ) {
-                            posterUrl = poster
-                        }
-                    )
-                }
+            newTvSeriesSearchResponse(
+                name = title,
+                url = href,
+                type = TvType.TvSeries
+            ) {
+                posterUrl = poster
             }
 
-        return results.distinctBy {
-            it.url
+        } else {
+
+            newMovieSearchResponse(
+                name = title,
+                url = href,
+                type = TvType.Movie
+            ) {
+                posterUrl = poster
+            }
         }
     }
 
@@ -173,104 +131,267 @@ class SetFilmizleProvider : MainAPI() {
         val document =
             app.get(url).document
 
-        val titleElement =
-            document.selectFirst(
-                "h1.entry-title, h1.post-title, h1.title, h1"
-            )
-
         val title =
-            titleElement
+            document
+                .selectFirst("h1")
                 ?.text()
+                ?.substringBefore(" izle")
                 ?.trim()
                 ?: return null
 
         val poster =
-            document
-                .selectFirst(
-                    "meta[property=og:image]"
-                )
-                ?.attr("content")
-                ?.takeIf {
-                    it.isNotBlank()
-                }
+            fixUrlNull(
+                document
+                    .selectFirst(
+                        "div.poster img"
+                    )
+                    ?.attr("src")
+            )
 
         val description =
             document
                 .selectFirst(
-                    "meta[property=og:description]"
+                    "div.wp-content p"
                 )
-                ?.attr("content")
+                ?.text()
                 ?.trim()
-                ?.takeIf {
-                    it.isNotBlank()
-                }
 
-        val year =
+        var year =
             document
                 .selectFirst(
-                    ".year, .release-year, .film-year, .movie-year"
+                    "div.extra span.C a"
                 )
                 ?.text()
                 ?.trim()
                 ?.toIntOrNull()
 
-        val genres =
+        val tags =
             document
-                .select(
-                    ".genre a, .genres a, .category a, .categories a"
-                )
+                .select("div.sgeneros a")
                 .map {
                     it.text().trim()
                 }
-                .filter {
-                    it.isNotBlank()
-                }
-                .distinct()
 
-        val isSeries =
+        val rating =
+            document
+                .selectFirst(
+                    "span.dt_rating_vgs"
+                )
+                ?.text()
+                ?.trim()
+                ?.toRatingInt()
+
+        var duration =
+            document
+                .selectFirst(
+                    "span.runtime"
+                )
+                ?.text()
+                ?.split(" ")
+                ?.first()
+                ?.trim()
+                ?.toIntOrNull()
+
+        val recommendations =
+            document
+                .select(
+                    "div.srelacionados article"
+                )
+                .mapNotNull {
+                    it.toRecommendationResult()
+                }
+
+        val actors =
+            document
+                .select("span.valor a")
+                .map {
+                    Actor(it.text())
+                }
+
+        val trailer =
+            Regex(
+                """embed/(.*)\?rel"""
+            )
+                .find(document.html())
+                ?.groupValues
+                ?.get(1)
+                ?.let {
+                    "https://www.youtube.com/embed/$it"
+                }
+
+        // DİZİ
+        if (
             url.contains(
                 "/dizi/",
                 ignoreCase = true
-            ) ||
-            url.contains(
-                "/series/",
-                ignoreCase = true
             )
+        ) {
 
-        if (isSeries) {
+            year =
+                document
+                    .selectFirst(
+                        "a[href*='/yil/']"
+                    )
+                    ?.text()
+                    ?.trim()
+                    ?.toIntOrNull()
+
+            duration =
+                document
+                    .selectFirst(
+                        "div#info span:containsOwn(Dakika)"
+                    )
+                    ?.text()
+                    ?.split(" ")
+                    ?.first()
+                    ?.trim()
+                    ?.toIntOrNull()
+
+            val episodes =
+                document
+                    .select(
+                        "div#episodes ul.episodios li"
+                    )
+                    .mapNotNull {
+
+                        val episodeLink =
+                            it.selectFirst(
+                                "h4.episodiotitle a"
+                            )
+                                ?: return@mapNotNull null
+
+                        val episodeUrl =
+                            fixUrlNull(
+                                episodeLink.attr("href")
+                            )
+                                ?: return@mapNotNull null
+
+                        val episodeName =
+                            episodeLink
+                                .ownText()
+                                .trim()
+
+                        val episodeDetail =
+                            episodeLink
+                                .ownText()
+                                .trim()
+
+                        val season =
+                            Regex(
+                                """(\d+)\.\s*Sezon"""
+                            )
+                                .find(
+                                    episodeDetail
+                                )
+                                ?.groupValues
+                                ?.get(1)
+                                ?.toIntOrNull()
+
+                        val episode =
+                            Regex(
+                                """Sezon\s+\d+\.\s*Bölüm\s+(\d+)"""
+                            )
+                                .find(
+                                    episodeDetail
+                                )
+                                ?.groupValues
+                                ?.get(1)
+                                ?.toIntOrNull()
+
+                        newEpisode(
+                            episodeUrl
+                        ) {
+                            this.name = episodeName
+                            this.season = season
+                            this.episode = episode
+                        }
+                    }
 
             return newTvSeriesLoadResponse(
                 name = title,
                 url = url,
                 type = TvType.TvSeries,
-                episodes = emptyList()
+                episodes = episodes
             ) {
 
                 posterUrl = poster
-
                 plot = description
-
                 this.year = year
+                this.tags = tags
+                this.rating = rating
+                this.duration = duration
+                this.recommendations = recommendations
 
-                this.tags = genres
+                addActors(actors)
+                addTrailer(trailer)
+            }
+        }
+
+        // FİLM
+        return newMovieLoadResponse(
+            name = title,
+            url = url,
+            type = TvType.Movie,
+            dataUrl = url
+        ) {
+
+            posterUrl = poster
+            plot = description
+            this.year = year
+            this.tags = tags
+            this.rating = rating
+            this.duration = duration
+            this.recommendations = recommendations
+
+            addActors(actors)
+            addTrailer(trailer)
+        }
+    }
+
+    private fun Element.toRecommendationResult():
+        SearchResponse? {
+
+        val title =
+            selectFirst("a img")
+                ?.attr("alt")
+                ?: return null
+
+        val href =
+            fixUrlNull(
+                selectFirst("a")
+                    ?.attr("href")
+            )
+                ?: return null
+
+        val poster =
+            fixUrlNull(
+                selectFirst("a img")
+                    ?.attr("data-src")
+            )
+
+        return if (
+            href.contains(
+                "/dizi/",
+                ignoreCase = true
+            )
+        ) {
+
+            newTvSeriesSearchResponse(
+                name = title,
+                url = href,
+                type = TvType.TvSeries
+            ) {
+                posterUrl = poster
             }
 
         } else {
 
-            return newMovieLoadResponse(
+            newMovieSearchResponse(
                 name = title,
-                url = url,
-                type = TvType.Movie,
-                dataUrl = url
+                url = href,
+                type = TvType.Movie
             ) {
-
                 posterUrl = poster
-
-                plot = description
-
-                this.year = year
-
-                this.tags = genres
             }
         }
     }
